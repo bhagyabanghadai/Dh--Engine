@@ -1,17 +1,55 @@
-# Epic 4: The Circuit Breaker & Autonomous Retry
-**Status**: Blocked (Requires Epics 1, 2, & 3)
+﻿# Epic 4: Circuit Breaker and Autonomous Retry
+**Status**: Blocked (Requires Epics 1, 2, and 3)
+**Depends On**: Epics 1, 2, 3
 
 ## Goal
-Implement the autonomous self-repair loop. When the Sandbox rejects LLM-generated code, Dhi must take the error traceback, append it to a new prompt, and ask the LLM to fix it—halting if it fails 3 times.
+Implement bounded self-repair loop that retries only retryable failures and halts safely with explicit terminal state.
+
+## In Scope
+- Retry state machine
+- Retry eligibility matrix
+- Max attempt enforcement
+- Final terminal/error contracts
+
+## Out of Scope
+- Graph-aware context retrieval
+- VEIL memory persistence
+
+## Retry Semantics (Locked)
+- `max_attempts = 3` total attempts per request (attempts 1, 2, 3).
+- Equivalent `max_retries = 2` after initial attempt.
+- Any attempt beyond 3 is prohibited.
 
 ## Requirements
-1. **The State Machine:** Write the Orchestration Loop in `FastAPI`. 
-2. **The Fix Prompt:** Compile a deterministic "Repair Prompt" template: *"Your code failed with this exact error: {traceback}. Fix the bug."*
-3. **The Retry Limits:** Implement a hard-coded integer counter. `MAX_RETRIES = 3`. 
-4. **Error Classification:** Write logic that reads the Sandbox output. If the failure is a `TimeoutViolation` or `NetworkAccessViolation`, halt immediately. Only retry on standard test/syntax failures.
+1. Implement orchestration loop in control plane:
+   - `candidate_generated -> verification_running -> fail/pass -> retry_or_halt`
+2. Implement deterministic repair prompt template using exact failure details.
+3. Retry only for retryable failure classes:
+   - `syntax`
+   - `deterministic`
+4. Do not retry for non-retryable classes/events:
+   - `policy`
+   - `timeout`
+   - `flake` above threshold
+   - `NetworkAccessViolation`
+   - `StrictModeUnavailable`
+   - `StrictModeRequired`
+5. Emit terminal event on final fail:
+   - `MaxRetriesExceeded`
+6. Final response includes:
+   - `attempt_count`
+   - `retry_count`
+   - `final_status`
+   - `terminal_event` when applicable
 
 ## Exit Gates (Definition of Done)
-- [ ] Sending a prompt that forces the AI to write bad code triggers the retry loop.
-- [ ] Dhi successfully parses the error, resubmits it, and validates the fixed code on Attempt 2.
-- [ ] The final manifest returned to the user shows `"retry_count": 1` and provides the final verified code.
-- [ ] Simulating an unfixable structural failure results in Dhi halting exactly at 3 retries and returning a `MaxRetriesExceeded` error to the user.
+- [ ] Known bad generation triggers retry flow.
+- [ ] Fix on attempt 2 returns `retry_count=1` and pass manifest.
+- [ ] Unfixable deterministic failure halts at attempt 3 with `MaxRetriesExceeded`.
+- [ ] Non-retryable policy/timeout violations halt immediately.
+- [ ] No code path allows unbounded retries.
+
+## Artifacts Produced
+- Circuit breaker state machine implementation
+- Retry eligibility classifier
+- Retry flow tests and terminal-state tests

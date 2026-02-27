@@ -1,17 +1,45 @@
-# Epic 3: The Cloud Interceptor & Generation
-**Status**: Blocked (Requires Epics 1 & 2)
+﻿# Epic 3: Cloud Interceptor and Safe Generation
+**Status**: Blocked (Requires Epics 1 and 2)
+**Depends On**: Epics 1, 2
 
 ## Goal
-Establish the outbound connection to the Genius Cloud. Dhi must take a prompt, send it to a frontier LLM via API, and successfully parse the returned code chunk.
+Accept user prompt, build safe outbound context, call cloud LLM, parse response deterministically, and hand candidate code to sandbox verification.
+
+## In Scope
+- Cloud gateway integration
+- Context governance before egress
+- Candidate extraction and validation
+- Integration with sandbox verifier
+
+## Out of Scope
+- Autonomous retries
+- AST dependency slicing (advanced path in Epic 5)
+- VEIL writes
 
 ## Requirements
-1. **LLM Gateway Integration:** Use `litellm` in `src/dhi/interceptor/` to abstract the API calls (allowing switching between Claude/Gemini/OpenAI easily).
-2. **The System Prompt:** Compile the deterministic system prompt that instructs the AI on how to format its code responses so Dhi can seamlessly extract them.
-3. **The Extraction Logic:** Build a reliable regex/parser that separates the LLM's conversational text from the actual Python code block it generated.
-4. **Integration with Sandbox:** Connect the output of the Cloud Brain directly to the Sandbox Executor built in Epic 2. 
+1. Implement LLM gateway abstraction in `src/dhi/interceptor/` using `litellm`.
+2. Build pre-egress governance pipeline:
+   - Path allowlist and denylist enforcement
+   - Secret scan and DLP redaction (`<REDACTED_SECRET>`)
+   - Prompt-injection-aware context minimization
+   - Egress audit record (`request_id`, file_count, redaction_count)
+3. Use structured model output contract (JSON object) as primary extraction method:
+   - `language`
+   - `code`
+   - `notes`
+4. Use markdown code-fence parser only as fallback when structured response is unavailable.
+5. Validate extracted code payload is non-empty and syntactically parseable before sandbox handoff.
+6. Send candidate directly to Epic 2 executor and return combined response.
 
 ## Exit Gates (Definition of Done)
-- [ ] Sending a basic text prompt ("Write a function that adds two numbers") to the FastAPI endpoint successfully triggers a cloud API call.
-- [ ] Dhi perfectly extracts the raw Python code from the LLM's Markdown response string.
-- [ ] That extracted code is automatically fed into the Epic 2 sandbox.
-- [ ] The user receives a single JSON manifest indicating whether the cloud-generated code passed or failed the local proof.
+- [ ] User prompt triggers cloud API call through gateway abstraction.
+- [ ] Outbound context is scanned and audited before API request.
+- [ ] Structured response parsing succeeds for primary path.
+- [ ] Fallback parser works for fenced code responses.
+- [ ] Extracted code is always passed to sandbox verifier.
+- [ ] API response includes sandbox verification result, not raw model text only.
+
+## Artifacts Produced
+- Cloud interceptor with governance gate
+- Egress audit logs
+- Candidate extraction module with tests
