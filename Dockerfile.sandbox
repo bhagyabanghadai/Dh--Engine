@@ -1,0 +1,16 @@
+# Sandbox Docker image for Dhi balanced-mode verification
+# Minimal Python image — no extras, no network, no secrets.
+FROM python:3.11-slim
+
+# Drop all Linux capabilities and run as non-root
+RUN groupadd --gid 1001 sandbox && \
+    useradd --uid 1001 --gid sandbox --no-create-home sandbox
+
+# Install only what is needed to execute Python code
+RUN pip install --no-cache-dir pytest==8.0.0
+
+WORKDIR /workspace
+USER sandbox
+
+# Default command - overridden by executor.py at runtime
+CMD ["python", "--version"]

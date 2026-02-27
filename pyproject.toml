@@ -5,7 +5,9 @@ description = "System 2 cognitive middleware for AI coding assistants"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "docker>=7.1.0",
     "fastapi>=0.110.0",
+    "pydantic>=2.12.5",
     "uvicorn[standard]>=0.29.0",
 ]
 
