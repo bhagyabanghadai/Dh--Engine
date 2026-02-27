@@ -36,15 +36,15 @@ Create a deterministic Python baseline for Dhi so all later epics build on a sta
    - `version`: `0.1.0-dev`
 5. Add unit test verifying `/health` returns `200` and expected JSON schema.
 6. Add baseline scripts/commands in project docs or task runner for:
-   - `ruff check .`
-   - `mypy src tests`
-   - `pytest -q`
+   - `uv run ruff check .`
+   - `uv run mypy src tests`
+   - `uv run pytest -q`
 
 ## Exit Gates (Definition of Done)
-- [ ] `uv sync` succeeds deterministically.
-- [ ] `ruff check .` returns zero errors.
-- [ ] `mypy src tests` returns zero errors.
-- [ ] `pytest -q` passes.
+- [ ] `uv sync --extra dev` succeeds deterministically.
+- [ ] `uv run ruff check .` returns zero errors.
+- [ ] `uv run mypy src tests` returns zero errors.
+- [ ] `uv run pytest -q` passes.
 - [ ] FastAPI app boots locally and `/health` returns expected payload.
 - [ ] No encoding artifacts in created files.
 
