@@ -37,6 +37,9 @@ cache_dir = ".cache/mypy"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "integration: tests that require Docker and sandbox image setup",
+]
 
 [build-system]
 requires = ["hatchling"]

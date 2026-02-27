@@ -1,35 +1,40 @@
-"""
-Sandbox policy test suite — Task 2.5 (Pod B/A QA: python-testing-patterns).
+﻿"""
+Sandbox policy test suite.
 
-Covers all 5 exit gates from Epic 2 spec. Uses parametrize for clarity.
-Tests against the classifier directly (unit) — full executor tests require
-Docker to be available and are marked with @pytest.mark.integration.
+Covers Epic 2 exit gates and deterministic classifier behavior.
 """
+
+from __future__ import annotations
 
 import pytest
 
 from dhi.sandbox.classifier import classify
 from dhi.sandbox.models import FailureClass, ViolationEvent
 
-# ---------------------------------------------------------------------------
-# Unit tests for the violation classifier (no Docker required)
-# ---------------------------------------------------------------------------
-
 
 class TestClassifier:
-    """Unit tests for the deterministic violation classifier."""
+    """Unit tests for deterministic violation classification."""
 
     def test_clean_pass_returns_none_pair(self) -> None:
-        """Exit 0, no timed_out → both values are None."""
         event, cls = classify(exit_code=0, stdout="ok", stderr="", timed_out=False)
         assert event is None
         assert cls is None
 
     def test_timeout_takes_priority(self) -> None:
-        """timed_out flag always maps to TimeoutViolation regardless of exit code."""
         event, cls = classify(exit_code=0, stdout="", stderr="", timed_out=True)
         assert event == ViolationEvent.TimeoutViolation
         assert cls == FailureClass.timeout
+
+    def test_output_cap_violation_is_policy_failure(self) -> None:
+        event, cls = classify(
+            exit_code=0,
+            stdout="",
+            stderr="",
+            timed_out=False,
+            output_capped=True,
+        )
+        assert event == ViolationEvent.OutputLimitViolation
+        assert cls == FailureClass.policy
 
     @pytest.mark.parametrize(
         "stderr_snippet",
@@ -41,7 +46,6 @@ class TestClassifier:
         ],
     )
     def test_network_violation_classified(self, stderr_snippet: str) -> None:
-        """Network error strings → NetworkAccessViolation + policy class."""
         event, cls = classify(
             exit_code=1,
             stdout="",
@@ -60,7 +64,6 @@ class TestClassifier:
         ],
     )
     def test_filesystem_write_violation_classified(self, stderr_snippet: str) -> None:
-        """Read-only FS error strings → FilesystemWriteViolation + policy class."""
         event, cls = classify(
             exit_code=1,
             stdout="",
@@ -70,8 +73,27 @@ class TestClassifier:
         assert event == ViolationEvent.FilesystemWriteViolation
         assert cls == FailureClass.policy
 
+    def test_process_limit_violation_classified(self) -> None:
+        event, cls = classify(
+            exit_code=1,
+            stdout="",
+            stderr="fork: retry: Resource temporarily unavailable",
+            timed_out=False,
+        )
+        assert event == ViolationEvent.ProcessLimitViolation
+        assert cls == FailureClass.policy
+
+    def test_syscall_violation_classified(self) -> None:
+        event, cls = classify(
+            exit_code=1,
+            stdout="",
+            stderr="Operation not permitted",
+            timed_out=False,
+        )
+        assert event == ViolationEvent.SyscallViolation
+        assert cls == FailureClass.policy
+
     def test_oom_classified_as_memory_limit(self) -> None:
-        """Exit 137 (SIGKILL) without a clear error → MemoryLimitViolation."""
         event, cls = classify(
             exit_code=137,
             stdout="",
@@ -82,7 +104,6 @@ class TestClassifier:
         assert cls == FailureClass.policy
 
     def test_syntax_error_classified(self) -> None:
-        """SyntaxError in stderr → syntax failure class, no terminal event."""
         event, cls = classify(
             exit_code=1,
             stdout="",
@@ -93,7 +114,6 @@ class TestClassifier:
         assert cls == FailureClass.syntax
 
     def test_generic_failure_classified_as_deterministic(self) -> None:
-        """Non-zero exit with no policy signal → deterministic failure class."""
         event, cls = classify(
             exit_code=1,
             stdout="",
@@ -104,22 +124,21 @@ class TestClassifier:
         assert cls == FailureClass.deterministic
 
 
-# ---------------------------------------------------------------------------
-# Integration tests — require Docker (marked so CI can skip if unavailable)
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.integration
 class TestSandboxExecutor:
-    """
-    Integration tests that run real Docker containers.
-    Require: docker ps succeeds, dhi-sandbox:latest image exists.
-    Run with: pytest -m integration
-    Skip in CI without Docker: pytest -m "not integration"
-    """
+    """Integration tests that run real Docker containers."""
+
+    @pytest.fixture(autouse=True)
+    def _require_docker(self) -> None:
+        docker = pytest.importorskip("docker")
+        try:
+            client = docker.from_env()
+            client.ping()
+            client.images.get("dhi-sandbox:latest")
+        except Exception as exc:  # pragma: no cover - environment dependent
+            pytest.skip(f"Docker integration prerequisites unavailable: {exc}")
 
     def test_valid_python_returns_pass(self) -> None:
-        """Exit gate 1: Valid code path returns status=pass."""
         from dhi.sandbox.executor import run_in_sandbox
 
         result = run_in_sandbox(
@@ -131,13 +150,11 @@ class TestSandboxExecutor:
         assert result.exit_code == 0
         assert result.terminal_event is None
         assert result.failure_class is None
-        # Verify all required contract fields are present
         assert result.request_id == "test-pass"
         assert result.attempt == 1
         assert result.duration_ms >= 0
 
     def test_syntax_error_returns_fail_with_traceback(self) -> None:
-        """Exit gate 2: Broken code returns status=fail with SyntaxError in stderr."""
         from dhi.sandbox.executor import run_in_sandbox
 
         result = run_in_sandbox(
@@ -147,10 +164,9 @@ class TestSandboxExecutor:
         )
         assert result.status == "fail"
         assert result.failure_class == FailureClass.syntax
-        assert "SyntaxError" in result.stderr or "SyntaxError" in result.stderr.lower()
+        assert "SyntaxError" in result.stderr or "syntaxerror" in result.stderr.lower()
 
     def test_infinite_loop_triggers_timeout(self) -> None:
-        """Exit gate 3: Infinite loop must be killed and classified as TimeoutViolation."""
         from dhi.sandbox.executor import run_in_sandbox
 
         result = run_in_sandbox(
@@ -161,11 +177,9 @@ class TestSandboxExecutor:
         assert result.status == "fail"
         assert result.terminal_event == ViolationEvent.TimeoutViolation
         assert result.failure_class == FailureClass.timeout
-        # Should complete within the timeout window + small buffer
-        assert result.duration_ms <= 50_000  # 50 seconds
+        assert result.duration_ms <= 50_000
 
     def test_network_call_blocked(self) -> None:
-        """Exit gate 4: Outbound network attempt fails with NetworkAccessViolation."""
         from dhi.sandbox.executor import run_in_sandbox
 
         code = (
@@ -178,7 +192,6 @@ class TestSandboxExecutor:
         assert result.failure_class == FailureClass.policy
 
     def test_filesystem_write_blocked(self) -> None:
-        """Exit gate 5: Write to read-only source mount fails with FilesystemWriteViolation."""
         from dhi.sandbox.executor import run_in_sandbox
 
         code = (
