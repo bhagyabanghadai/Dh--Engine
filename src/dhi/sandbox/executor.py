@@ -31,6 +31,7 @@ _BALANCED_CPU_NANO = 2_000_000_000  # 2 vCPU in nanocpus
 _BALANCED_PIDS_LIMIT = 256
 _BALANCED_LOG_CAP = 10 * 1024 * 1024  # 10 MB
 _BALANCED_SCRATCH_CAP_BYTES = 512 * 1024 * 1024  # 512 MB
+_CAPPED_LOG_PREVIEW_BYTES = 8 * 1024  # keep API payloads small on capped output
 
 _SANDBOX_IMAGE = "dhi-sandbox:latest"
 _SOURCE_PATH = "/source"
@@ -169,8 +170,13 @@ def run_in_sandbox(
                     len(raw_stdout) > _BALANCED_LOG_CAP
                     or len(raw_stderr) > _BALANCED_LOG_CAP
                 )
-                stdout = raw_stdout[:_BALANCED_LOG_CAP].decode("utf-8", errors="replace")
-                stderr = raw_stderr[:_BALANCED_LOG_CAP].decode("utf-8", errors="replace")
+                stdout = _decode_stream(raw_stdout)
+                stderr = _decode_stream(raw_stderr)
+
+                if len(raw_stdout) > _BALANCED_LOG_CAP:
+                    stdout = _summarize_capped_stream(raw_stdout, stream_name="stdout")
+                if len(raw_stderr) > _BALANCED_LOG_CAP:
+                    stderr = _summarize_capped_stream(raw_stderr, stream_name="stderr")
             except docker.errors.DockerException:
                 stdout = ""
                 stderr = "Failed to retrieve container logs."
@@ -231,4 +237,18 @@ def run_in_sandbox(
         stdout=stdout,
         stderr=stderr,
         runtime_config=runtime_config,
+    )
+
+
+def _decode_stream(raw: bytes) -> str:
+    return raw[:_BALANCED_LOG_CAP].decode("utf-8", errors="replace")
+
+
+def _summarize_capped_stream(raw: bytes, *, stream_name: str) -> str:
+    preview = raw[:_CAPPED_LOG_PREVIEW_BYTES].decode("utf-8", errors="replace")
+    return (
+        f"{preview}\n\n"
+        f"[TRUNCATED_{stream_name.upper()} "
+        f"original_bytes={len(raw)} cap_bytes={_BALANCED_LOG_CAP} "
+        f"preview_bytes={_CAPPED_LOG_PREVIEW_BYTES}]"
     )
