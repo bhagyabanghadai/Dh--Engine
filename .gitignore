@@ -13,3 +13,13 @@ dist/
 build/
 *.egg-info/
 
+# Local scratch outputs
+out*.txt
+pytest_output*.txt
+test_out.txt
+test_results.txt
+
+# Local secrets
+.env
+.env.local
+.env.*.local
